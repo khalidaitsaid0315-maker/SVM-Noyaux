@@ -6,19 +6,32 @@ import plotly.graph_objects as go
 import plotly.express as px
 import warnings
 import os
-import sys
+import sys  # <--- C'est bien importé ici
+
 warnings.filterwarnings('ignore')
+
 # === AUTO-ENTRAÎNEMENT SI LES MODÈLES MANQUENT (pour Streamlit Cloud) ===
 if not os.path.exists('models/saved_models/all_results.pkl'):
     st.warning("Modèles non trouvés → Entraînement automatique en cours (première fois seulement)...")
     import subprocess
-    result = subprocess.run(["python", "train_svm.py"], capture_output=True, text=True)
+    
+    # --- CORRECTION ICI ---
+    # Remplacer "python" par sys.executable pour utiliser le bon environnement
+    result = subprocess.run([sys.executable, "train_svm.py"], capture_output=True, text=True)
+    # ----------------------
+
     if result.returncode == 0:
         st.success("Entraînement terminé ! L'app est prête.")
     else:
         st.error("Échec de l'entraînement automatique.")
         st.code(result.stdout + result.stderr)
         st.stop()
+
+# =============================================
+# CONFIGURATION
+# =============================================
+st.set_page_config(
+    # ... la suite de votre code reste identique ...
 
 # =============================================
 # CONFIGURATION
@@ -493,3 +506,4 @@ st.markdown("""
 </div>
 
 """, unsafe_allow_html=True)
+
