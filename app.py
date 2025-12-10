@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 import warnings
 import os
-
+import sys
 warnings.filterwarnings('ignore')
 # === AUTO-ENTRAÎNEMENT SI LES MODÈLES MANQUENT (pour Streamlit Cloud) ===
 if not os.path.exists('models/saved_models/all_results.pkl'):
@@ -491,4 +491,5 @@ st.markdown("""
         Détection du cancer du sein — SVM à Noyaux 
     </h4>
 </div>
+
 """, unsafe_allow_html=True)
