@@ -14,7 +14,7 @@ warnings.filterwarnings('ignore')
 if not os.path.exists('models/saved_models/all_results.pkl'):
     st.warning("Modèles non trouvés → Entraînement automatique en cours (première fois seulement)...")
     import subprocess
-    # Utilisation de sys.executable pour garantir l'accès aux librairies installées
+    # Utilisation de sys.executable pour garantir l'accès aux librairies installées (pandas, etc.)
     result = subprocess.run([sys.executable, "train_svm.py"], capture_output=True, text=True)
     
     if result.returncode == 0:
@@ -134,6 +134,7 @@ def load_results():
         with open('models/saved_models/all_results.pkl', 'rb') as f:
             return pickle.load(f)
     except FileNotFoundError:
+        # Si le fichier n'est pas trouvé, on arrête proprement (l'auto-train au début gère ça normalement)
         st.error("Fichier all_results.pkl introuvable. Exécutez train_svm.py d'abord.")
         st.stop()
 
@@ -190,13 +191,16 @@ with st.sidebar:
     )
 
 # =============================================
-# PAGES (simplifiées pour claires)
+# PAGES
 # =============================================
 if page == "Accueil":
     col1, col2, col3 = st.columns(3)
     col1.metric("Datasets", len(results))
     col2.metric("Modèles", sum(len(v) for v in results.values()))
-    col3.metric("Accuracy moyenne", f"{np.mean([v['accuracy'] for d in results.values() for v in d.values()]):.1%}")
+    # Calcul sécurisé de la moyenne
+    all_accuracies = [v['accuracy'] for d in results.values() for v in d.values()]
+    mean_acc = np.mean(all_accuracies) if all_accuracies else 0
+    col3.metric("Accuracy moyenne", f"{mean_acc:.1%}")
     st.success("Tous les modèles sont chargés avec succès")
 
 elif page == "Résultats":
@@ -206,6 +210,7 @@ elif page == "Résultats":
         for ds, ks in results.items() for k, v in ks.items()
     ])
     st.dataframe(df.style.highlight_max(axis=0, color='#d4edda'), use_container_width=True)
+
 elif page == "Comparaison":
     st.header("Comparaison Complète des Performances")
 
@@ -218,19 +223,19 @@ elif page == "Comparaison":
         "<strong>Métrique à visualiser</strong>"
     "</p>", 
     unsafe_allow_html=True
-)
+    )
 
     metric = st.selectbox(
-    label=" ",  # on met un espace pour cacher le label par défaut
-    options=['accuracy', 'f1', 'auc'],
-    format_func=lambda x: {
-        'accuracy': 'Accuracy',
-        'f1': 'F1-Score',
-        'auc': 'AUC-ROC (Area Under Curve)'
-    }[x],
-    index=2,
-    label_visibility="collapsed"  # cache le label gris de Streamlit
-)
+        label=" ",
+        options=['accuracy', 'f1', 'auc'],
+        format_func=lambda x: {
+            'accuracy': 'Accuracy',
+            'f1': 'F1-Score',
+            'auc': 'AUC-ROC (Area Under Curve)'
+        }[x],
+        index=2,
+        label_visibility="collapsed"
+    )
     # Récupération des données
     data = []
     for ds, kernels in results.items():
@@ -245,22 +250,25 @@ elif page == "Comparaison":
     df_plot = pd.DataFrame(data)
 
     # Graphique
-    fig = px.bar(
-        df_plot,
-        x='Dataset', y='Score %', color='Noyau',
-        barmode='group',
-        text=df_plot['Score %'].apply(lambda x: f"{x:.1f}%"),
-        color_discrete_map={'LINEAR':'#006666', 'POLY':'#e67e22', 'RBF':'#2980b9', 'SIGMOID':'#c0392b'},
-        title=f"Comparaison des { {'accuracy':'Accuracy','f1':'F1-Score','auc':'AUC-ROC'}[metric] }",
-        height=600
-    )
-    fig.update_traces(textposition='outside')
-    fig.update_layout(
-        yaxis=dict(tickformat=".1f", range=[40, 105], title="Performance (%)"),
-        legend_title="Noyau SVM",
-        font=dict(size=14)
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    if not df_plot.empty:
+        fig = px.bar(
+            df_plot,
+            x='Dataset', y='Score %', color='Noyau',
+            barmode='group',
+            text=df_plot['Score %'].apply(lambda x: f"{x:.1f}%"),
+            color_discrete_map={'LINEAR':'#006666', 'POLY':'#e67e22', 'RBF':'#2980b9', 'SIGMOID':'#c0392b'},
+            title=f"Comparaison des { {'accuracy':'Accuracy','f1':'F1-Score','auc':'AUC-ROC'}[metric] }",
+            height=600
+        )
+        fig.update_traces(textposition='outside')
+        fig.update_layout(
+            yaxis=dict(tickformat=".1f", range=[40, 105], title="Performance (%)"),
+            legend_title="Noyau SVM",
+            font=dict(size=14)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("Pas de données à afficher.")
 
     # Tableau récapitulatif des 3 métriques
     st.markdown("### Tableau récapitulatif complet")
@@ -272,12 +280,13 @@ elif page == "Comparaison":
             row[f"{k.upper()} F1"]  = f"{v['f1']:.3f}"
             row[f"{k.upper()} AUC"] = f"{v.get('auc',0):.3f}"
         summary.append(row)
-    st.dataframe(
-        pd.DataFrame(summary).set_index('Dataset')
-        .style.highlight_max(axis=1, color="#9b8585"),
-        use_container_width=True
-    )
- 
+    
+    if summary:
+        st.dataframe(
+            pd.DataFrame(summary).set_index('Dataset')
+            .style.highlight_max(axis=1, color="#9b8585"),
+            use_container_width=True
+        )
 
 elif page == "Meilleur Noyau":
     # Créer deux onglets
@@ -287,19 +296,23 @@ elif page == "Meilleur Noyau":
         st.header("  Meilleur Noyau par Dataset")
         best_kernels = []
         for ds, kernels in results.items():
-            best_kernel = max(kernels.items(), key=lambda x: x[1]['accuracy'])
-            best_kernels.append({
-                'Dataset': ds,
-                'Meilleur Noyau': best_kernel[0].upper(),
-                'Accuracy': f"{best_kernel[1]['accuracy']:.4f}",
-                'F1-Score': f"{best_kernel[1]['f1']:.4f}",
-                'AUC-ROC': f"{best_kernel[1].get('auc',0):.4f}"
-            })
-        st.dataframe(
-            pd.DataFrame(best_kernels).set_index('Dataset')
-            .style.highlight_max(axis=0, color="#80E79F"),
-            use_container_width=True
-        )
+            if kernels: # Sécurité si vide
+                best_kernel = max(kernels.items(), key=lambda x: x[1]['accuracy'])
+                best_kernels.append({
+                    'Dataset': ds,
+                    'Meilleur Noyau': best_kernel[0].upper(),
+                    'Accuracy': f"{best_kernel[1]['accuracy']:.4f}",
+                    'F1-Score': f"{best_kernel[1]['f1']:.4f}",
+                    'AUC-ROC': f"{best_kernel[1].get('auc',0):.4f}"
+                })
+        if best_kernels:
+            st.dataframe(
+                pd.DataFrame(best_kernels).set_index('Dataset')
+                .style.highlight_max(axis=0, color="#80E79F"),
+                use_container_width=True
+            )
+        else:
+            st.warning("Aucun résultat disponible.")
     
     with tab2:
         st.header("  Meilleur Noyau Global")
@@ -310,17 +323,18 @@ elif page == "Meilleur Noyau":
                 if overall_best is None or v['accuracy'] > overall_best[2]['accuracy']:
                     overall_best = (ds, k, v)
         
-        st.success(f" Meilleur noyau global : **{overall_best[1].upper()}** sur le dataset **{overall_best[0]}** "
-                   f"avec une accuracy de **{overall_best[2]['accuracy']:.4f}**")
-        
-        # Afficher les détails
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Accuracy", f"{overall_best[2]['accuracy']:.4f}")
-        with col2:
-            st.metric("F1-Score", f"{overall_best[2]['f1']:.4f}")
-        with col3:
-            st.metric("AUC-ROC", f"{overall_best[2].get('auc', 0):.4f}")
+        if overall_best:
+            st.success(f" Meilleur noyau global : **{overall_best[1].upper()}** sur le dataset **{overall_best[0]}** "
+                       f"avec une accuracy de **{overall_best[2]['accuracy']:.4f}**")
+            
+            # Afficher les détails
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Accuracy", f"{overall_best[2]['accuracy']:.4f}")
+            with col2:
+                st.metric("F1-Score", f"{overall_best[2]['f1']:.4f}")
+            with col3:
+                st.metric("AUC-ROC", f"{overall_best[2].get('auc', 0):.4f}")
 
 elif page == "Prédiction":
     # Titre principal
@@ -397,9 +411,19 @@ elif page == "Prédiction":
     dataset = st.selectbox("Choisir le type d'analyse", list(results.keys()),
                            format_func=lambda x: f"{x} — {DATASET_INFO[x]['desc']}")
     
-    best_kernel = max(results[dataset].items(), key=lambda x: x[1]['accuracy'])[0]
+    # Sécurité pour trouver le meilleur noyau
+    best_kernel_name = 'linear' # Default
+    if results[dataset]:
+        best_kernel_name = max(results[dataset].items(), key=lambda x: x[1]['accuracy'])[0]
+    
+    # Trouver l'index par défaut
+    try:
+        default_index = ['linear','poly','rbf','sigmoid'].index(best_kernel_name)
+    except ValueError:
+        default_index = 0
+
     kernel = st.radio("Noyau SVM", ['linear','poly','rbf','sigmoid'],
-                      format_func=str.upper, index=['linear','poly','rbf','sigmoid'].index(best_kernel))
+                      format_func=str.upper, index=default_index)
 
     st.info(DATASET_INFO[dataset]['desc'])
 
@@ -497,5 +521,3 @@ st.markdown("""
 </div>
 
 """, unsafe_allow_html=True)
-
-
